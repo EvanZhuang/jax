@@ -31,6 +31,7 @@ from jax._src import lax
 from jax._src import numpy as jnp
 from jax._src import util
 from jax._src.core import AxisName
+from jax._src.lax import utils as lax_utils
 from jax._src.cudnn.fused_attention_stablehlo import (
     dot_product_attention as cudnn_dot_product_attention, MaskType)
 from jax._src.cudnn.scaled_matmul_stablehlo import (
@@ -663,6 +664,10 @@ def _one_hot(x: Array, num_classes: int, *,
     return jnp.asarray(x == axis_idx, dtype=dtype)
   assert isinstance(axis, SupportsIndex)
   axis = operator.index(axis)
+  if dtypes.isdtype(x.dtype, "integral"):
+    min_dtype = lax_utils.int_dtype_for_dim(num_classes, signed=True)
+    if dtypes.iinfo(x.dtype).bits < dtypes.iinfo(min_dtype).bits:
+      x = lax.convert_element_type(x, min_dtype)
   lhs = lax.expand_dims(x, (axis,))
   rhs_shape = [1] * x.ndim
   rhs_shape.insert(out_axis, num_classes)
