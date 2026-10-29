@@ -932,6 +932,28 @@ class NNFunctionsTest(jtu.JaxTestCase):
                                              "jax.nn.one_hot input should be integer-typed"):
       nn.one_hot(jnp.array([1.0]), 3)
 
+  @jtu.sample_product(
+    dtype=[np.int8, np.uint8, np.int16, np.uint16],
+  )
+  def testOneHotNarrowIntegerIndices(self, dtype):
+    iinfo = np.iinfo(dtype)
+    num_classes = 2 ** iinfo.bits + 44
+    vals = (
+        [iinfo.min, -1, 0, 5, iinfo.max]
+        if iinfo.min < 0
+        else [0, 5, iinfo.max]
+    )
+    x = jnp.array(vals, dtype=dtype)
+    expected = np.arange(num_classes) == np.asarray(x, dtype=np.int64)[:, None]
+    actual = nn.one_hot(x, num_classes)
+    actual_jit = jax.jit(nn.one_hot, static_argnums=1)(x, num_classes)
+    self.assertArraysEqual(
+        actual, expected.astype(actual.dtype), check_dtypes=True
+    )
+    self.assertArraysEqual(
+        actual_jit, expected.astype(actual.dtype), check_dtypes=True
+    )
+
   def testTanhExists(self):
     nn.tanh  # doesn't crash
 
