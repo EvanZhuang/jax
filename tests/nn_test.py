@@ -220,6 +220,33 @@ class NNFunctionsTest(jtu.JaxTestCase):
     self.assertArraysEqual(x_q[0, :, 0].astype(jnp.float32),
                            jnp.full((8,), max_value, dtype=jnp.float32))
 
+  @parameterized.product(
+      mode=["mxfp8", "mxfp4"],
+      dtype=[jnp.bfloat16, jnp.float32],
+  )
+  def testMxQuantizeNaN(self, mode, dtype):
+    if not jtu.test_device_matches(["gpu", "cpu"]):
+      raise unittest.SkipTest("Test requires GPU or CPU.")
+    configs = create_mx_configs_if_available(mode)
+    # 32 rows: the backward pass also quantizes along this axis.
+    a = jnp.ones((1, 32, 64), dtype).at[0, 0, 3].set(jnp.nan)
+    b = jnp.ones((1, 32, 64), dtype)
+    x_q, scales = jax.jit(partial(quantize, config=configs[0]))(a)
+    self.assertEqual(int(scales.view(jnp.uint8)[0, 0, 0]), 0xFF)
+    self.assertTrue(
+        jnp.all(x_q[0, 0, :32].at[3].set(0).astype(jnp.float32) == 0))
+    dimension_numbers = (((2,), (2,)), ((0,), (0,)))
+    fwd = jax.jit(partial(
+        nn.scaled_dot_general, dimension_numbers=dimension_numbers,
+        configs=configs))
+    out = fwd(a, b)
+    self.assertTrue(jnp.all(jnp.isnan(out[0, 0])))
+    self.assertTrue(jnp.all(out[0, 1:] == 64))
+    grad_b = jax.jit(jax.grad(lambda x, y: jnp.sum(fwd(x, y)), argnums=1))(
+        a, b)
+    self.assertTrue(jnp.all(jnp.isnan(grad_b[0, :, 3])))
+    self.assertTrue(jnp.all(jnp.delete(grad_b[0], 3, axis=1) == 32))
+
   @parameterized.product(mode=["mxfp8", "mxfp4"])
   def testScaledDotGeneralKeepsQuantization(self, mode):
     # Inputs that are not representable in the element format: the jitted
